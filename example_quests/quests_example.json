@@ -1,0 +1,35 @@
+{
+  "Quests": [
+    {
+      "ID": "example_boar_hunt",
+      "Title": "Boar Hunt",
+      "Goal": "Meadows boars have been rooting through the fields. Thin them out.",
+      "Rarity": "Common",
+      "KillReqs": [
+        { "Prefab": "Boar", "Amount": 5 }
+      ],
+      "RewardItems": [
+        { "Prefab": "Coins", "Amount": 30 }
+      ],
+      "SkillRewards": [
+        { "Skill": "Unarmed", "Amount": 15 }
+      ],
+      "ExpReward": 100
+    },
+    {
+      "ID": "example_supply_run",
+      "PreReqID": "example_boar_hunt",
+      "Title": "Supply Run",
+      "Goal": "Gather wood and stone for the outpost.",
+      "Rarity": "Common",
+      "GatherReqs": [
+        { "Prefab": "Wood", "Amount": 20 },
+        { "Prefab": "Stone", "Amount": 10 }
+      ],
+      "RewardItems": [
+        { "Prefab": "Amber", "Amount": 1 }
+      ],
+      "ExpReward": 80
+    }
+  ]
+}
