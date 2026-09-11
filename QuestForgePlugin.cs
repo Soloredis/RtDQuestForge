@@ -24,7 +24,7 @@ namespace RtDQuestForge
 
         public const string PluginName = "RtDQuestForge";
 
-        public const string PluginVersion = "0.1.5";
+        public const string PluginVersion = "0.1.6";
 
         public static QuestManager Manager;
 
