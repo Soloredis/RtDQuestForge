@@ -16,15 +16,13 @@ namespace RtDQuestForge
     [BepInDependency("com.jotunn.jotunn", BepInDependency.DependencyFlags.HardDependency)]
     [BepInDependency("com.ValheimModding.NewtonsoftJsonDetector", BepInDependency.DependencyFlags.HardDependency)]
     [BepInIncompatibility("blacks7ar.SeedBed")]
-    [BepInIncompatibility("randyknapp.mods.epicloot")]
-    [BepInIncompatibility("org.bepinex.plugins.valheim_plus")]
     internal partial class QuestForgePlugin : BaseUnityPlugin
     {
         public const string PluginGUID = "soloredis.rtdquestforge";
 
         public const string PluginName = "RtDQuestForge";
 
-        public const string PluginVersion = "0.1.6";
+        public const string PluginVersion = "0.2.0";
 
         public static QuestManager Manager;
 
