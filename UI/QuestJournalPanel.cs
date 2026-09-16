@@ -8,11 +8,6 @@ using UnityEngine.UI;
 
 namespace RtDQuestForge.UI
 {
-    // Built at runtime from Valheim's own UI sprites (woodpanel, Norse font,
-    // styled buttons) pulled through Jotunn's GUIManager, so the journal
-    // matches the vanilla inventory look without shipping an asset bundle.
-    // All player facing strings resolve through Valheim's localization system
-    // using the $rtdqf_ tokens loaded from the translations folder.
     public class QuestJournalPanel : MonoBehaviour
     {
         private QuestManager Manager;
@@ -26,10 +21,10 @@ namespace RtDQuestForge.UI
         private RectTransform CompletedListContainer;
 
         private readonly List<GameObject> EntryPool = new List<GameObject>();
-
-        // Paging between quest files. One page per source json file, so big
-        // modpacks with several quest packs stay readable.
+        
         private int CurrentPageIndex;
+        
+        private float lastPageChange;
 
         private List<string> SourceFiles = new List<string>();
 
@@ -41,8 +36,7 @@ namespace RtDQuestForge.UI
         {
             get { return RootPanel != null && RootPanel.activeSelf; }
         }
-
-        // Shorthand so every localized string in this file reads cleanly.
+        
         private static string L(string token)
         {
             return Localization.instance != null ? Localization.instance.Localize(token) : token;
@@ -73,9 +67,7 @@ namespace RtDQuestForge.UI
         {
             RootPanel.SetActive(true);
             Refresh();
-
-            // Frees the mouse cursor and blocks camera/player input while the
-            // journal is open, same behavior as Valheim's own menus.
+            
             GUIManager.BlockInput(true);
         }
 
@@ -96,9 +88,7 @@ namespace RtDQuestForge.UI
                 EntryPool.Clear();
 
                 if (Manager == null) return;
-
-                // Rebuild the page list from whatever files are loaded. Quests
-                // with no source (e.g. server-synced later) group under one page.
+                
                 SourceFiles = Manager.AllQuests.Quests
                     .Select(q => string.IsNullOrEmpty(q.SourceFile) ? "Quests" : q.SourceFile)
                     .Distinct()
@@ -128,10 +118,7 @@ namespace RtDQuestForge.UI
                 List<QuestConfig> availableQuests = Manager.GetAvailableQuests()
                     .Where(q => pageQuests.Contains(q))
                     .ToList();
-
-                // Quests whose prerequisite is not completed yet. Shown greyed
-                // out at the bottom of the Active column so players can see
-                // what exists and what unlocks it, instead of it being invisible.
+                
                 List<QuestConfig> lockedQuests = pageQuests
                     .Where(q => !Manager.Progress.CompletedQuestIDs.Contains(q.ID)
                              && !string.IsNullOrEmpty(q.PreReqID)
@@ -154,10 +141,12 @@ namespace RtDQuestForge.UI
         private void ChangePage(int direction)
         {
             if (SourceFiles.Count <= 1) return;
-
+            
+            if (Time.unscaledTime - lastPageChange < 0.2f) return;
+            lastPageChange = Time.unscaledTime;
+            
             CurrentPageIndex += direction;
-
-            // Wrap around at both ends.
+            
             if (CurrentPageIndex < 0) CurrentPageIndex = SourceFiles.Count - 1;
             if (CurrentPageIndex >= SourceFiles.Count) CurrentPageIndex = 0;
 
@@ -181,7 +170,6 @@ namespace RtDQuestForge.UI
 
         private void BuildUI()
         {
-            // Canvas setup
             GameObject canvasGO = new GameObject("QuestForge_JournalCanvas");
             canvasGO.transform.SetParent(transform, false);
 
@@ -195,8 +183,7 @@ namespace RtDQuestForge.UI
             scaler.matchWidthOrHeight = 0.5f;
 
             canvasGO.AddComponent<GraphicRaycaster>();
-
-            // Main panel, wide enough for two columns
+            
             RootPanel = new GameObject("Panel");
             RootPanel.transform.SetParent(canvasGO.transform, false);
 
@@ -206,8 +193,6 @@ namespace RtDQuestForge.UI
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.anchoredPosition = Vector2.zero;
 
-            // Valheim woodpanel background, falls back to the old flat color
-            // if the game sprite is not available for any reason.
             Image bg = RootPanel.AddComponent<Image>();
             Sprite woodPanel = GUIManager.Instance != null ? GUIManager.Instance.GetSprite("woodpanel_trophys") : null;
             if (woodPanel != null)
@@ -238,9 +223,7 @@ namespace RtDQuestForge.UI
             ActiveListContainer = BuildColumn(L("$rtdqf_active"), 0.0f, 0.5f);
             CompletedListContainer = BuildColumn(L("$rtdqf_completed"), 0.5f, 1.0f);
         }
-
-        // Small pager row in the top right corner of the panel for switching
-        // between loaded quest files. Hidden when only one file is loaded.
+        
         private void BuildPager()
         {
             PagerRoot = new GameObject("Pager");
@@ -254,7 +237,7 @@ namespace RtDQuestForge.UI
             pagerRect.anchoredPosition = new Vector2(-22, -20);
 
             // Previous page button
-            Button prevButton = CreateButton(PagerRoot.transform, "<", delegate { ChangePage(-1); });
+            Button prevButton = CreateButton(PagerRoot.transform, "<", delegate { ChangePage(-1); }, false);
             RectTransform prevRect = prevButton.GetComponent<RectTransform>();
             prevRect.anchorMin = new Vector2(0, 0);
             prevRect.anchorMax = new Vector2(0, 1);
@@ -263,7 +246,7 @@ namespace RtDQuestForge.UI
             prevRect.anchoredPosition = Vector2.zero;
 
             // Next page button
-            Button nextButton = CreateButton(PagerRoot.transform, ">", delegate { ChangePage(1); });
+            Button nextButton = CreateButton(PagerRoot.transform, ">", delegate { ChangePage(1); }, false);
             RectTransform nextRect = nextButton.GetComponent<RectTransform>();
             nextRect.anchorMin = new Vector2(1, 0);
             nextRect.anchorMax = new Vector2(1, 1);
@@ -279,9 +262,7 @@ namespace RtDQuestForge.UI
             labelRect.offsetMin = new Vector2(32, 0);
             labelRect.offsetMax = new Vector2(-32, 0);
         }
-
-        // Builds one titled, independently scrollable column between the given
-        // horizontal anchor fractions of the main panel.
+        
         private RectTransform BuildColumn(string header, float anchorLeft, float anchorRight)
         {
             GameObject columnGO = new GameObject("Column_" + header);
@@ -342,11 +323,10 @@ namespace RtDQuestForge.UI
             scrollRect.content = container;
             scrollRect.horizontal = false;
             scrollRect.vertical = true;
-            scrollRect.viewport = viewportRect;
-            scrollRect.content = container;
-            scrollRect.horizontal = false;
-            scrollRect.vertical = true;
+            
             scrollRect.scrollSensitivity = 500f;
+            scrollRect.inertia = false;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
 
             return container;
         }
@@ -368,10 +348,7 @@ namespace RtDQuestForge.UI
             bool locked = !completed
                        && !string.IsNullOrEmpty(quest.PreReqID)
                        && !Manager.Progress.CompletedQuestIDs.Contains(quest.PreReqID);
-
-            // Colored border by rarity, achieved by making the outer image the
-            // border color and inset an inner panel over top of it. Locked
-            // quests get a plain dark border regardless of rarity.
+            
             entry.AddComponent<Image>().color = locked ? new Color(0.35f, 0.35f, 0.35f) : QuestUIStyles.RarityColor(quest.Rarity);
 
             GameObject inner = new GameObject("Inner");
@@ -382,9 +359,7 @@ namespace RtDQuestForge.UI
             innerRect.anchorMax = Vector2.one;
             innerRect.offsetMin = new Vector2(3, 3);
             innerRect.offsetMax = new Vector2(-3, -3);
-
-            // Darkened woodpanel card, falls back to flat colors without it.
-            // Accepted quests get a subtle warm tint, locked quests are dimmed.
+            
             Image innerImage = inner.AddComponent<Image>();
             Sprite cardSprite = GUIManager.Instance != null ? GUIManager.Instance.GetSprite("woodpanel_trophys") : null;
             if (cardSprite != null)
@@ -445,10 +420,6 @@ namespace RtDQuestForge.UI
                 detailContent = BuildDetailLine(quest);
             }
             
-            
-            
-            
-
             Text detailText = CreateText(inner.transform, detailContent, 11, TextAnchor.LowerLeft);
             detailText.color = new Color(0.8f, 0.8f, 0.10f); // slightly lighter than body ink
             RectTransform detailRect = detailText.GetComponent<RectTransform>();
@@ -457,8 +428,7 @@ namespace RtDQuestForge.UI
             detailRect.pivot = new Vector2(0.5f, 0);
             detailRect.sizeDelta = new Vector2(-20, 40);
             detailRect.anchoredPosition = new Vector2(0, 16);
-
-            // Locked quests cannot be accepted, so they get no button at all.
+            
             if (!completed && !locked)
             {
                 Button questButton = CreateButton(inner.transform, accepted ? L("$rtdqf_abandon") : L("$rtdqf_accept"), delegate
@@ -473,7 +443,7 @@ namespace RtDQuestForge.UI
                     }
 
                     Refresh();
-                });
+                }, false);
 
                 RectTransform buttonRect = questButton.GetComponent<RectTransform>();
                 buttonRect.anchorMin = new Vector2(1, 1);
@@ -520,8 +490,6 @@ namespace RtDQuestForge.UI
                 rewards.Append("+" + skill.Amount + " " + skill.Skill + " XP");
             }
 
-            // EpicMMO EXP is only advertised when EpicMMO is actually installed,
-            // otherwise the reward would never be granted and the card would lie.
             if (quest.ExpReward > 0 && BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("WackyMole.EpicMMOSystem"))
             {
                 if (rewards.Length > 0) rewards.Append(", ");
@@ -537,10 +505,6 @@ namespace RtDQuestForge.UI
             return sb.ToString();
         }
         
-        // Resolves a prefab name to its localized display name by reading the
-        // same m_name the game itself shows. Works for creatures and items,
-        // vanilla or modded. Falls back to the raw prefab name when the
-        // prefab is unknown. Cached, lookups only happen once per prefab.
         private static readonly System.Collections.Generic.Dictionary<string, string> PrettyNameCache = new System.Collections.Generic.Dictionary<string, string>();
 
         private static string PrettyName(string prefabName)
@@ -579,9 +543,7 @@ namespace RtDQuestForge.UI
             PrettyNameCache[prefabName] = result;
             return result;
         }
-
-        // Uses Valheim's Norse serif font when available, keeps the built in
-        // Unity font as a fallback so text never renders blank.
+        
         private static Text CreateText(Transform parent, string content, int fontSize, TextAnchor anchor)
         {
             GameObject go = new GameObject("Text");
@@ -602,7 +564,6 @@ namespace RtDQuestForge.UI
             return text;
         }
 
-        // Valheim orange header text with the bold serif, matching vanilla menus.
         private static void ApplyValheimHeaderStyle(Text text)
         {
             if (GUIManager.Instance == null) return;
@@ -616,7 +577,7 @@ namespace RtDQuestForge.UI
             text.color = GUIManager.Instance.ValheimOrange;
         }
 
-        private static Button CreateButton(Transform parent, string label, UnityEngine.Events.UnityAction onClick)
+        private static Button CreateButton(Transform parent, string label, UnityEngine.Events.UnityAction onClick, bool valheimStyle = true)
         {
             GameObject go = new GameObject("Button");
             go.transform.SetParent(parent, false);
@@ -631,15 +592,40 @@ namespace RtDQuestForge.UI
             textRect.anchorMax = Vector2.one;
             textRect.offsetMin = Vector2.zero;
             textRect.offsetMax = Vector2.zero;
-
-            // Vanilla styled wooden button, falls back to a flat grey block.
-            if (GUIManager.Instance != null)
+            
+            if (valheimStyle && GUIManager.Instance != null)
             {
                 GUIManager.Instance.ApplyButtonStyle(button);
             }
             else
             {
-                go.GetComponent<Image>().color = new Color(0.2f, 0.2f, 0.2f);
+                Image img = go.GetComponent<Image>();
+
+                Sprite btnSprite = GUIManager.Instance != null ? GUIManager.Instance.GetSprite("button") : null;
+                if (btnSprite != null)
+                {
+                    img.sprite = btnSprite;
+                    img.type = Image.Type.Sliced;
+                }
+                else
+                {
+                    img.sprite = null;
+                    img.color = new Color(0.35f, 0.24f, 0.14f, 0.95f);
+                }
+                
+                ColorBlock cb = button.colors;
+                cb.normalColor = Color.white;
+                cb.highlightedColor = new Color(1.25f, 1.25f, 1.25f, 1f);
+                cb.pressedColor = new Color(0.75f, 0.75f, 0.75f, 1f);
+                button.colors = cb;
+                
+                text.fontSize = (label != null && label.Length <= 2) ? 18 : 12;
+                if (GUIManager.Instance != null)
+                {
+                    Font bold = GUIManager.Instance.AveriaSerifBold;
+                    if (bold != null) text.font = bold;
+                    text.color = GUIManager.Instance.ValheimOrange;
+                }
             }
 
             return button;
