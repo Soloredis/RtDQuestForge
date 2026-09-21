@@ -20,7 +20,7 @@ namespace RtDQuestForge
             GrantSkillXP(quest, logger);
             GrantEpicMmoXP(quest, logger);
         }
-
+        
         private static void GrantItems(QuestConfig quest, ManualLogSource logger)
         {
             try
@@ -41,13 +41,24 @@ namespace RtDQuestForge
                         continue;
                     }
 
-                    ItemDrop.ItemData itemData = itemDrop.m_itemData.Clone();
-                    itemData.m_stack = reward.Amount;
-
                     Inventory inventory = Player.m_localPlayer.GetInventory();
-                    if (!inventory.AddItem(itemData))
+                    int remaining = reward.Amount;
+                    int maxStack = Math.Max(1, itemDrop.m_itemData.m_shared.m_maxStackSize);
+
+                    while (remaining > 0)
                     {
-                        Player.m_localPlayer.DropItem(inventory, itemData, itemData.m_stack);
+                        int chunk = Math.Min(remaining, maxStack);
+                        ItemDrop.ItemData itemData = itemDrop.m_itemData.Clone();
+                        itemData.m_stack = chunk;
+                        
+                        itemData.m_dropPrefab = prefab;
+
+                        if (!inventory.AddItem(itemData))
+                        {
+                            Player.m_localPlayer.DropItem(inventory, itemData, itemData.m_stack);
+                        }
+
+                        remaining -= chunk;
                     }
                 }
             }
