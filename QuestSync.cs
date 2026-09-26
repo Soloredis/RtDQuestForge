@@ -56,30 +56,62 @@ namespace RtDQuestForge
         }
 
         // Called from the OnDeath patch when the killing blow came from a
-        // player who is not the local player on this machine. The package
-        // goes to the server, which forwards it to every client. Killer only:
-        // exactly one player name is carried, only that player gains progress.
-        public static void SendKillCredit(string killerPlayerName, string prefabName)
+        // player who is not the local player on this machine. Clients send the
+        // package to the server; if this machine IS the server (dedicated or
+        // listen host) it delivers directly. Killer only: exactly one player
+        // ID is carried, only that player gains progress.
+        public static void SendKillCredit(long killerPlayerID, string prefabName)
         {
             try
             {
-                if (KillRpc == null) return;
+                if (KillRpc == null || ZNet.instance == null) return;
 
                 // DEBUG handshake
                 if (QuestForgePlugin.VerboseLogging)
                 {
-                    Logger.LogMessage("Broadcasting kill credit package for " + killerPlayerName + " (" + prefabName + ").");
+                    Logger.LogMessage("Broadcasting kill credit package for " + killerPlayerID + " (" + prefabName + ").");
                 }
 
+                if (ZNet.instance.IsServer())
+                {
+                    DeliverKillCredit(killerPlayerID, prefabName);
+                    return;
+                }
+
+                ZNetPeer serverPeer = ZNet.instance.GetServerPeer();
+                if (serverPeer == null) return;
+
                 ZPackage package = new ZPackage();
-                package.Write(killerPlayerName);
+                package.Write(killerPlayerID);
                 package.Write(prefabName);
 
-                KillRpc.SendPackage(ZRoutedRpc.Everybody, package);
+                KillRpc.SendPackage(serverPeer.m_uid, package);
             }
             catch (Exception ex)
             {
                 Logger.LogWarning($"Exception caught while sending kill credit for {prefabName}: {ex}");
+            }
+        }
+
+        // Server side delivery. A listen host's own player is not a peer, so
+        // it is checked locally first; every remote peer then gets a copy and
+        // only the matching player registers it.
+        private static void DeliverKillCredit(long killerPlayerID, string prefabName)
+        {
+            if (Player.m_localPlayer != null
+                && Player.m_localPlayer.GetPlayerID() == killerPlayerID
+                && QuestForgePlugin.Manager != null)
+            {
+                QuestForgePlugin.Manager.RegisterKill(prefabName);
+            }
+
+            foreach (ZNetPeer peer in ZNet.instance.GetPeers())
+            {
+                ZPackage forward = new ZPackage();
+                forward.Write(killerPlayerID);
+                forward.Write(prefabName);
+
+                KillRpc.SendPackage(peer.m_uid, forward);
             }
         }
 
@@ -126,30 +158,23 @@ namespace RtDQuestForge
             yield break;
         }
 
-        // Kill credit arriving at the dedicated server. The server forwards
-        // the package to every connected client itself, rather than trusting
-        // broadcast semantics: the named killer's own client registers it.
+        // Kill credit arriving at the server (dedicated or listen host) from
+        // a client that owned the creature. Delivery is shared with the host
+        // path above so the host's own player is never skipped.
         private static IEnumerator OnKillServerReceive(long sender, ZPackage package)
         {
             try
             {
-                string killerPlayerName = package.ReadString();
+                long killerPlayerID = package.ReadLong();
                 string prefabName = package.ReadString();
 
                 // DEBUG handshake
                 if (QuestForgePlugin.VerboseLogging)
                 {
-                    Logger.LogMessage("Server forwarding kill credit for " + killerPlayerName + " (" + prefabName + ") to all peers.");
+                    Logger.LogMessage("Server forwarding kill credit for " + killerPlayerID + " (" + prefabName + ") to all peers.");
                 }
 
-                foreach (ZNetPeer peer in ZNet.instance.GetPeers())
-                {
-                    ZPackage forward = new ZPackage();
-                    forward.Write(killerPlayerName);
-                    forward.Write(prefabName);
-
-                    KillRpc.SendPackage(peer.m_uid, forward);
-                }
+                DeliverKillCredit(killerPlayerID, prefabName);
             }
             catch (Exception ex)
             {
@@ -170,11 +195,11 @@ namespace RtDQuestForge
                     Logger.LogMessage("Kill credit package received from peer " + sender + ".");
                 }
 
-                string killerPlayerName = package.ReadString();
+                long killerPlayerID = package.ReadLong();
                 string prefabName = package.ReadString();
 
                 if (Player.m_localPlayer != null
-                    && Player.m_localPlayer.GetPlayerName() == killerPlayerName
+                    && Player.m_localPlayer.GetPlayerID() == killerPlayerID
                     && QuestForgePlugin.Manager != null)
                 {
                     if (QuestForgePlugin.VerboseLogging)

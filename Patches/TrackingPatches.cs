@@ -38,12 +38,10 @@ namespace RtDQuestForge.Patches
             {
                 // A remote player's kill died on our machine (or on the
                 // dedicated server). Route the credit to the killer.
-                if (QuestForgePlugin.VerboseLogging)
-                {
-                    Jotunn.Logger.LogMessage("Routing kill credit: " + attackerPlayer.GetPlayerName() + " killed " + prefabName);
-                }
+                // DEBUG breadcrumb, remove once kill routing is verified.
+                Jotunn.Logger.LogMessage("Routing kill credit: " + attackerPlayer.GetPlayerName() + " killed " + prefabName);
 
-                QuestSync.SendKillCredit(attackerPlayer.GetPlayerName(), prefabName);
+                QuestSync.SendKillCredit(attackerPlayer.GetPlayerID(), prefabName);
             }
         }
     }

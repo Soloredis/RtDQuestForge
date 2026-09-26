@@ -207,6 +207,10 @@ namespace RtDQuestForge
             // CHANGED: a finished quest is no longer in the accepted list.
             Progress.AcceptedQuestIDs.Remove(quest.ID);
 
+            // Save the completion before granting rewards, so a crash in
+            // between can never leave a rewarded quest marked incomplete.
+            SaveProgress();
+
             if (OnQuestCompleted != null)
             {
                 OnQuestCompleted(quest);
