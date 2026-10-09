@@ -1,16 +1,25 @@
+using System.Collections.Generic;
 using HarmonyLib;
+using UnityEngine;
 
 namespace RtDQuestForge.Patches
 {
     // Fires exactly once when any Character dies, on whichever machine owns
-    // the creature. m_lastHit holds the HitData that killed it. If the killer
-    // is the local player the kill registers directly; if the killer is a
-    // remote player the credit is routed to them over the kill credit RPC,
-    // because their own machine never sees this OnDeath at all.
+    // the creature. m_lastHit holds the HitData that killed it. The killer
+    // and any SocialSystem party members near the kill all receive credit.
+    // Each recipient on this machine registers directly; remote recipients
+    // get it over the kill credit RPC, since their own machine never sees
+    // this OnDeath at all.
     [HarmonyPatch(typeof(Character), "OnDeath")]
     internal static class Patch_Character_OnDeath_KillTracking
     {
         private static readonly System.Reflection.FieldInfo LastHitField = AccessTools.Field(typeof(Character), "m_lastHit");
+
+        // SocialSystem stores each player's party ID in their ZDO under this
+        // key. ZDO data is synced to every machine, so it can be read here
+        // without referencing SocialSystem at all. 0 means no party, which is
+        // also what every player reads when SocialSystem is not installed.
+        private static readonly int PartyIdHash = "SocialSystem_PartyId".GetStableHashCode();
 
         private static void Postfix(Character __instance)
         {
@@ -26,25 +35,59 @@ namespace RtDQuestForge.Patches
 
             string prefabName = Utils.GetPrefabName(__instance.gameObject);
 
-            if (Player.m_localPlayer != null && attackerPlayer == Player.m_localPlayer)
+            foreach (Player recipient in GetRecipients(attackerPlayer, __instance.transform.position))
             {
-                // Our own kill on our own machine, no network needed.
-                if (QuestForgePlugin.Manager != null)
+                if (Player.m_localPlayer != null && recipient == Player.m_localPlayer)
                 {
-                    QuestForgePlugin.Manager.RegisterKill(prefabName);
+                    // Our own credit on our own machine, no network needed.
+                    if (QuestForgePlugin.Manager != null)
+                    {
+                        QuestForgePlugin.Manager.RegisterKill(prefabName);
+                    }
                 }
-            }
-            else
-            {
-                // A remote player's kill died on our machine (or on the
-                // dedicated server). Route the credit to the killer.
-                if (QuestForgePlugin.VerboseLogging)
+                else
                 {
-                    Jotunn.Logger.LogMessage("Routing kill credit: " + attackerPlayer.GetPlayerName() + " killed " + prefabName);
-                }
+                    // A remote player's credit. Route it to them.
+                    if (QuestForgePlugin.VerboseLogging)
+                    {
+                        Jotunn.Logger.LogMessage("Routing kill credit: " + recipient.GetPlayerName() + " for " + prefabName);
+                    }
 
-                QuestSync.SendKillCredit(attackerPlayer.GetPlayerID(), prefabName);
+                    QuestSync.SendKillCredit(recipient.GetPlayerID(), prefabName);
+                }
             }
+        }
+
+        // The killer, plus every living party member within range of the kill.
+        private static List<Player> GetRecipients(Player killer, Vector3 killPosition)
+        {
+            List<Player> recipients = new List<Player>();
+            recipients.Add(killer);
+
+            if (!QuestForgePlugin.PartySharing) return recipients;
+
+            int killerParty = GetPartyId(killer);
+            if (killerParty == 0) return recipients;
+
+            float range = QuestForgePlugin.PartyShareRange;
+
+            foreach (Player player in Player.GetAllPlayers())
+            {
+                if (player == null || player == killer || player.IsDead()) continue;
+                if (GetPartyId(player) != killerParty) continue;
+                if (Vector3.Distance(player.transform.position, killPosition) > range) continue;
+
+                recipients.Add(player);
+            }
+
+            return recipients;
+        }
+
+        private static int GetPartyId(Player player)
+        {
+            ZNetView nview = player != null ? player.GetComponent<ZNetView>() : null;
+            ZDO zdo = nview != null ? nview.GetZDO() : null;
+            return zdo != null ? zdo.GetInt(PartyIdHash, 0) : 0;
         }
     }
 

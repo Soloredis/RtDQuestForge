@@ -22,13 +22,17 @@ namespace RtDQuestForge
 
         public const string PluginName = "RtDQuestForge";
 
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.3.1";
 
         public static QuestManager Manager;
 
         private static BepInEx.Logging.ManualLogSource StaticLogger;
 
         private static ConfigEntry<bool> LoggingEnable;
+
+        private static ConfigEntry<bool> PartySharingEnable;
+
+        private static ConfigEntry<float> PartySharingRange;
 
         private ConfigEntry<KeyboardShortcut> JournalHotkey;
 
@@ -41,6 +45,17 @@ namespace RtDQuestForge
         public static bool VerboseLogging
         {
             get { return LoggingEnable != null && LoggingEnable.Value; }
+        }
+
+        // Party kill sharing settings, admin only so the server decides.
+        public static bool PartySharing
+        {
+            get { return PartySharingEnable == null || PartySharingEnable.Value; }
+        }
+
+        public static float PartyShareRange
+        {
+            get { return PartySharingRange != null ? PartySharingRange.Value : 70f; }
         }
 
         private void Awake()
@@ -70,6 +85,16 @@ namespace RtDQuestForge
                 JournalHotkey = Config.Bind("General", "JournalHotkey", new KeyboardShortcut(KeyCode.L), new ConfigDescription("Key to open the quest journal.", null, new ConfigurationManagerAttributes
                 {
                     IsAdminOnly = false
+                }));
+
+                PartySharingEnable = Config.Bind("Party Sharing", "Enable", true, new ConfigDescription("Share kill credit with SocialSystem party members near the kill.", null, new ConfigurationManagerAttributes
+                {
+                    IsAdminOnly = true
+                }));
+
+                PartySharingRange = Config.Bind("Party Sharing", "Range", 70f, new ConfigDescription("How close a party member must be to the kill, in metres, to receive credit.", new AcceptableValueRange<float>(5f, 200f), new ConfigurationManagerAttributes
+                {
+                    IsAdminOnly = true
                 }));
             }
             catch (Exception ex)
