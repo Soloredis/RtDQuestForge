@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.IO;
 using BepInEx.Logging;
 using Jotunn.Entities;
 using Jotunn.Managers;
@@ -18,6 +20,17 @@ namespace RtDQuestForge
 
         private static CustomRPC KillRpc;
 
+        private static CustomRPC CompletionRpc;
+
+        // Server side record of completed quests, keyed by player ID. Saved
+        // to config/RtDQuestForge/serverdata/completions.json. The subfolder
+        // keeps it out of the quest loader, which only scans the top folder.
+        private static Dictionary<long, HashSet<string>> ServerCompletions;
+
+        private const byte CompletionSync = 0;
+
+        private const byte CompletionRecord = 1;
+
         private static ManualLogSource Logger;
 
         public static void Init(ManualLogSource logger)
@@ -27,6 +40,7 @@ namespace RtDQuestForge
                 Logger = logger;
                 SyncRpc = NetworkManager.Instance.AddRPC("rtdqf_questsync", OnServerReceive, OnClientReceive);
                 KillRpc = NetworkManager.Instance.AddRPC("rtdqf_killcredit", OnKillServerReceive, OnKillClientReceive);
+                CompletionRpc = NetworkManager.Instance.AddRPC("rtdqf_completions", OnCompletionServerReceive, OnCompletionClientReceive);
             }
             catch (Exception ex)
             {
@@ -48,6 +62,8 @@ namespace RtDQuestForge
 
                 SyncRpc.SendPackage(serverPeer.m_uid, new ZPackage());
                 Logger.LogMessage("Requested quest list from the server.");
+
+                SendCompletionSync(serverPeer);
             }
             catch (Exception ex)
             {
@@ -112,6 +128,175 @@ namespace RtDQuestForge
                 forward.Write(prefabName);
 
                 KillRpc.SendPackage(peer.m_uid, forward);
+            }
+        }
+
+        // Sends this character's local completions to the server on spawn.
+        // The server merges them into its record and answers with the full
+        // list, so wiping local configs cannot reset completed quests, and
+        // completions from before this feature carry over.
+        private static void SendCompletionSync(ZNetPeer serverPeer)
+        {
+            if (CompletionRpc == null || Player.m_localPlayer == null || QuestForgePlugin.Manager == null) return;
+
+            ZPackage package = new ZPackage();
+            package.Write(CompletionSync);
+            package.Write(Player.m_localPlayer.GetPlayerID());
+
+            HashSet<string> local = QuestForgePlugin.Manager.Progress.CompletedQuestIDs;
+            package.Write(local.Count);
+            foreach (string questID in local)
+            {
+                package.Write(questID);
+            }
+
+            CompletionRpc.SendPackage(serverPeer.m_uid, package);
+        }
+
+        // Called when the local player completes a quest. Hosts and
+        // singleplayer keep their own progress file as the record.
+        public static void ReportCompletion(string questID)
+        {
+            try
+            {
+                if (CompletionRpc == null || ZNet.instance == null || ZNet.instance.IsServer()) return;
+                if (Player.m_localPlayer == null) return;
+
+                ZNetPeer serverPeer = ZNet.instance.GetServerPeer();
+                if (serverPeer == null) return;
+
+                ZPackage package = new ZPackage();
+                package.Write(CompletionRecord);
+                package.Write(Player.m_localPlayer.GetPlayerID());
+                package.Write(questID);
+
+                CompletionRpc.SendPackage(serverPeer.m_uid, package);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Exception caught while reporting quest completion {questID}: {ex}");
+            }
+        }
+
+        // Runs on the server. A sync merges and answers with the full list;
+        // a record just adds the one quest.
+        private static IEnumerator OnCompletionServerReceive(long sender, ZPackage package)
+        {
+            try
+            {
+                byte kind = package.ReadByte();
+                long playerID = package.ReadLong();
+                HashSet<string> completed = GetServerCompletions(playerID);
+                bool changed = false;
+
+                if (kind == CompletionSync)
+                {
+                    int count = package.ReadInt();
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (completed.Add(package.ReadString())) changed = true;
+                    }
+
+                    ZPackage response = new ZPackage();
+                    response.Write(completed.Count);
+                    foreach (string questID in completed)
+                    {
+                        response.Write(questID);
+                    }
+
+                    CompletionRpc.SendPackage(sender, response);
+                }
+                else if (kind == CompletionRecord)
+                {
+                    if (completed.Add(package.ReadString())) changed = true;
+                }
+
+                if (changed)
+                {
+                    SaveServerCompletions();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Exception caught while handling quest completions from peer {sender}: {ex}");
+            }
+
+            yield break;
+        }
+
+        // Runs on the client when the server's completion list arrives.
+        private static IEnumerator OnCompletionClientReceive(long sender, ZPackage package)
+        {
+            try
+            {
+                int count = package.ReadInt();
+                List<string> completed = new List<string>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    completed.Add(package.ReadString());
+                }
+
+                if (QuestForgePlugin.Manager != null)
+                {
+                    QuestForgePlugin.Manager.ApplyServerCompletions(completed);
+                    Logger.LogMessage("Applied " + completed.Count + " completed quest(s) from the server.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Exception caught while applying completed quests from the server: {ex}");
+            }
+
+            yield break;
+        }
+
+        private static string ServerCompletionsPath()
+        {
+            return Path.Combine(BepInEx.Paths.ConfigPath, QuestForgePlugin.PluginName, "serverdata", "completions.json");
+        }
+
+        private static HashSet<string> GetServerCompletions(long playerID)
+        {
+            if (ServerCompletions == null)
+            {
+                ServerCompletions = new Dictionary<long, HashSet<string>>();
+
+                string path = ServerCompletionsPath();
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        Dictionary<long, HashSet<string>> loaded = JsonConvert.DeserializeObject<Dictionary<long, HashSet<string>>>(File.ReadAllText(path));
+                        if (loaded != null) ServerCompletions = loaded;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"Exception caught while loading server completions, starting empty: {ex}");
+                    }
+                }
+            }
+
+            HashSet<string> completed;
+            if (!ServerCompletions.TryGetValue(playerID, out completed))
+            {
+                completed = new HashSet<string>();
+                ServerCompletions[playerID] = completed;
+            }
+
+            return completed;
+        }
+
+        private static void SaveServerCompletions()
+        {
+            try
+            {
+                string path = ServerCompletionsPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonConvert.SerializeObject(ServerCompletions, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Exception caught while saving server completions: {ex}");
             }
         }
 

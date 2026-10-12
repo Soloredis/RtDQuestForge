@@ -49,6 +49,29 @@ namespace RtDQuestForge
             AllQuests = list != null ? list : new QuestList();
         }
 
+        // Merges the server's record of completed quests into local progress.
+        // Completions only ever get added, so wiping local configs cannot
+        // make a quest repeatable again on a dedicated server.
+        public void ApplyServerCompletions(IEnumerable<string> questIDs)
+        {
+            bool changed = false;
+
+            foreach (string questID in questIDs)
+            {
+                if (Progress.CompletedQuestIDs.Add(questID))
+                {
+                    Progress.AcceptedQuestIDs.Remove(questID);
+                    Progress.TrackedQuestIDs.Remove(questID);
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                SaveProgress();
+            }
+        }
+
         public void LoadProgress(string characterName)
         {
             try

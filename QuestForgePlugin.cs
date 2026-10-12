@@ -22,7 +22,7 @@ namespace RtDQuestForge
 
         public const string PluginName = "RtDQuestForge";
 
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         public static QuestManager Manager;
 
@@ -234,6 +234,10 @@ namespace RtDQuestForge
             try
             {
                 RewardGranter.GrantRewards(quest, StaticLogger);
+
+                // Let the server record it, so it stays completed even if
+                // local configs are deleted.
+                QuestSync.ReportCompletion(quest.ID);
 
                 if (Player.m_localPlayer != null)
                 {
